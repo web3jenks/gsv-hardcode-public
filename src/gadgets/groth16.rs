@@ -18,7 +18,7 @@ use crate::{
         bn254::{
             G2Projective, final_exponentiation::final_exponentiation_montgomery, fq::Fq,
             fq12::Fq12, fr::Fr, g1::G1Projective,
-            pairing::multi_miller_loop_groth16_evaluate_montgomery_fast,
+            pairing::multi_miller_loop_groth16_ac_only,
         },
     },
 };
@@ -59,38 +59,27 @@ pub fn groth16_verify<C: CircuitContext>(
     input: &Groth16VerifyInputWires,
 ) -> WireId {
     let Groth16VerifyInputWires {
-        public,
+        public: _,
+        public_native,
         a,
         b,
         c,
         vk,
     } = input;
 
-    // Standard verification with public inputs
-    // MSM: sum_i public[i] * gamma_abc_g1[i+1]
-    let bases: Vec<ark_bn254::G1Projective> = vk
-        .gamma_abc_g1
-        .iter()
-        .skip(1)
-        .take(public.len())
-        .map(|a| a.into_group())
-        .collect();
-    let msm_temp =
-        G1Projective::msm_with_constant_bases_montgomery::<10, _>(circuit, public, &bases);
+    // `x` is a Garble input, so the public MSM is a host constant.
+    // Move e(msm, -gamma) off-circuit and miller only (C, A).
+    let mut msm = vk.gamma_abc_g1[0].into_group();
+    for (scalar, base) in public_native.iter().zip(vk.gamma_abc_g1.iter().skip(1)) {
+        msm += *base * *scalar;
+    }
 
-    // Add the constant term gamma_abc_g1[0] in Montgomery form
-    let gamma0_m = G1Projective::as_montgomery(vk.gamma_abc_g1[0].into_group());
-    let msm =
-        G1Projective::add_montgomery(circuit, &msm_temp, &G1Projective::new_constant(&gamma0_m));
+    let pairing_msm = ark_bn254::Bn254::pairing(msm, -vk.gamma_g2).0;
 
-    let msm_affine = projective_to_affine_montgomery(circuit, &msm);
-
-    let f = multi_miller_loop_groth16_evaluate_montgomery_fast(
+    let f = multi_miller_loop_groth16_ac_only(
         circuit,
-        &msm_affine,  // p1
         c,            // p2
         a,            // p3
-        -vk.gamma_g2, // q1
         -vk.delta_g2, // q2
         b,            // q3
     );
@@ -104,9 +93,11 @@ pub fn groth16_verify<C: CircuitContext>(
     .inverse()
     .unwrap();
 
+    let target = alpha_beta * pairing_msm.inverse().unwrap();
+
     let f = final_exponentiation_montgomery(circuit, &f);
 
-    Fq12::equal_constant(circuit, &f, &Fq12::as_montgomery(alpha_beta))
+    Fq12::equal_constant(circuit, &f, &Fq12::as_montgomery(target))
 }
 
 /// Decompress a compressed G1 point (x, sign bit) into projective wires with z = 1 (Montgomery domain).
@@ -259,6 +250,7 @@ pub fn groth16_verify_compressed<C: CircuitContext>(
         circuit,
         &Groth16VerifyInputWires {
             public: input.public.clone(),
+            public_native: input.public_native.clone(),
             a,
             b,
             c,
@@ -279,6 +271,7 @@ pub struct Groth16VerifyInput {
 #[derive(Debug)]
 pub struct Groth16VerifyInputWires {
     pub public: Vec<Fr>,
+    pub public_native: Vec<ark_bn254::Fr>,
     pub a: G1Projective,
     pub b: G2Projective,
     pub c: G1Projective,
@@ -291,6 +284,7 @@ impl CircuitInput for Groth16VerifyInput {
     fn allocate(&self, mut issue: impl FnMut() -> WireId) -> Self::WireRepr {
         Groth16VerifyInputWires {
             public: self.public.iter().map(|_| Fr::new(&mut issue)).collect(),
+            public_native: self.public.clone(),
             a: G1Projective::new(&mut issue),
             b: G2Projective::new(&mut issue),
             c: G1Projective::new(issue),
@@ -379,6 +373,7 @@ pub struct Groth16VerifyCompressedInput(pub Groth16VerifyInput);
 #[derive(Debug)]
 pub struct Groth16VerifyCompressedInputWires {
     pub public: Vec<Fr>,
+    pub public_native: Vec<ark_bn254::Fr>,
     pub a: CompressedG1Wires,
     pub b: CompressedG2Wires,
     pub c: CompressedG1Wires,
@@ -393,6 +388,7 @@ impl WiresObject for Groth16VerifyCompressedInputWires {
     fn clone_from(&self, mut issue: &mut impl FnMut() -> WireId) -> Self {
         Groth16VerifyCompressedInputWires {
             public: self.public.iter().map(|_| Fr::new(&mut issue)).collect(),
+            public_native: self.public_native.clone(),
             a: CompressedG1Wires::new(&mut issue),
             b: CompressedG2Wires::new(&mut issue),
             c: CompressedG1Wires::new(&mut issue),
@@ -407,6 +403,7 @@ impl CircuitInput for Groth16VerifyCompressedInput {
     fn allocate(&self, mut issue: impl FnMut() -> WireId) -> Self::WireRepr {
         Groth16VerifyCompressedInputWires {
             public: self.0.public.iter().map(|_| Fr::new(&mut issue)).collect(),
+            public_native: self.0.public.clone(),
             a: CompressedG1Wires::new(&mut issue),
             b: CompressedG2Wires::new(&mut issue),
             c: CompressedG1Wires::new(&mut issue),

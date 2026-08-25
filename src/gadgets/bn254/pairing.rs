@@ -853,6 +853,58 @@ pub fn multi_miller_loop_groth16_evaluate_montgomery_fast<C: CircuitContext>(
     f
 }
 
+/// Miller loop for Groth16 without the public-input pairing `e(msm, -gamma)`.
+/// Use this when `msm` is a host constant, so that pairing is moved off-circuit.
+pub fn multi_miller_loop_groth16_ac_only<C: CircuitContext>(
+    circuit: &mut C,
+    p2: &G1Projective,
+    p3: &G1Projective,
+    q2: ark_bn254::G2Affine,
+    q3: &G2Projective,
+) -> Fq12 {
+    let q2ell = ell_coeffs(q2);
+    let q3ell = ell_coeffs_montgomery(circuit, q3);
+    let mut q2_ell = q2ell.iter();
+    let mut q3_ell = q3ell.iter();
+
+    let mut f = new_fq12_constant_montgomery(ark_bn254::Fq12::ONE);
+
+    for i in (1..ark_bn254::Config::ATE_LOOP_COUNT.len()).rev() {
+        if i != ark_bn254::Config::ATE_LOOP_COUNT.len() - 1 {
+            f = Fq12::square_montgomery(circuit, &f);
+        }
+
+        let q2ell_next = q2_ell.next().unwrap();
+        f = ell_by_constant_montgomery(circuit, &f, &Fq6::as_montgomery(*q2ell_next), p2);
+
+        let q3ell_next = q3_ell.next().unwrap().clone();
+        f = ell_montgomery(circuit, &f, &q3ell_next, p3);
+
+        let bit = ark_bn254::Config::ATE_LOOP_COUNT[i - 1];
+        if bit == 1 || bit == -1 {
+            let q2ell_next = q2_ell.next().unwrap();
+            f = ell_by_constant_montgomery(circuit, &f, &Fq6::as_montgomery(*q2ell_next), p2);
+
+            let q3ell_next = q3_ell.next().unwrap().clone();
+            f = ell_montgomery(circuit, &f, &q3ell_next, p3);
+        }
+    }
+
+    let q2ell_next = q2_ell.next().unwrap();
+    f = ell_by_constant_montgomery(circuit, &f, &Fq6::as_montgomery(*q2ell_next), p2);
+
+    let q3ell_next = q3_ell.next().unwrap().clone();
+    f = ell_montgomery(circuit, &f, &q3ell_next, p3);
+
+    let q2ell_next = q2_ell.next().unwrap();
+    f = ell_by_constant_montgomery(circuit, &f, &Fq6::as_montgomery(*q2ell_next), p2);
+
+    let q3ell_next = q3_ell.next().unwrap().clone();
+    f = ell_montgomery(circuit, &f, &q3ell_next, p3);
+
+    f
+}
+
 #[cfg(test)]
 mod tests {
     use ark_ec::{AffineRepr, CurveGroup, PrimeGroup};

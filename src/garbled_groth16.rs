@@ -188,6 +188,7 @@ impl CircuitInput for GarblerInput {
             public: (0..self.public_params_len)
                 .map(|_| FrWire::new(&mut issue))
                 .collect(),
+            public_native: Vec::new(),
             a,
             b,
             c,
@@ -405,6 +406,7 @@ impl CircuitInput for EvaluatorInput {
             public: (0..self.public.len())
                 .map(|_| FrWire::new(&mut issue))
                 .collect(),
+            public_native: Vec::new(),
             a,
             b,
             c,
@@ -509,6 +511,7 @@ impl CircuitInput for GarblerCompressedInput {
             public: (0..self.inner.public_params_len)
                 .map(|_| FrWire::new(&mut issue))
                 .collect(),
+            public_native: Vec::new(),
             a: CompressedG1Wires::new(&mut issue),
             b: CompressedG2Wires::new(&mut issue),
             c: CompressedG1Wires::new(issue),
@@ -717,6 +720,7 @@ impl CircuitInput for EvaluatorCompressedInput {
             public: (0..self.public.len())
                 .map(|_| FrWire::new(&mut issue))
                 .collect(),
+            public_native: Vec::new(),
             a: CompressedG1Wires::new(&mut issue),
             b: CompressedG2Wires::new(&mut issue),
             c: CompressedG1Wires::new(issue),
